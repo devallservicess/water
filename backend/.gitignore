@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+data/pharma.db
+.pytest_cache/
+test-venv/
+.venv/

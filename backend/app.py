@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from models.db import q_all, q_one, exec_sql
@@ -8,113 +13,104 @@ from services.agent import handle_message
 app = Flask(__name__)
 CORS(app)
 
+# ── Request Logging ─────────────────────────────────
+@app.before_request
+def log_request():
+    from datetime import datetime
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"{ts} {request.method} {request.path}", flush=True)
+
+# ── Health Check ────────────────────────────────────
+@app.get("/api/health")
+def health():
+    return jsonify({
+        "status": "healthy",
+        "version": "2.0",
+        "ai_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "endpoints": ["/api/dashboard", "/api/employees/all", "/api/planning/all",
+                      "/api/absences/all", "/api/chat", "/api/analytics", "/api/health"]
+    })
+
 def get_current_week_start():
-    # Monday of current week based on sqlite now
     row = q_one("SELECT date('now', 'weekday 1', '-7 days') AS ws")
     return row["ws"]
 
+# ── Dashboard ───────────────────────────────────────
 @app.get("/api/dashboard")
 def dashboard():
-    week_start = request.args.get("week", get_current_week_start())
-    week_start, week_end = week_bounds(week_start)
+    try:
+        week_start = request.args.get("week", get_current_week_start())
+        week_start, week_end = week_bounds(week_start)
 
-    total_employees = q_one("SELECT COUNT(*) AS c FROM employees WHERE active=1")["c"]
-    pending_absences = q_one("SELECT COUNT(*) AS c FROM absences WHERE status='pending'")["c"]
-    approved_absences = q_one("SELECT COUNT(*) AS c FROM absences WHERE status='approved'")["c"]
+        total_employees = q_one("SELECT COUNT(*) AS c FROM employees WHERE active=1")["c"]
+        pending_absences = q_one("SELECT COUNT(*) AS c FROM absences WHERE status='pending'")["c"]
+        approved_absences = q_one("SELECT COUNT(*) AS c FROM absences WHERE status='approved'")["c"]
 
-    today = q_one("SELECT date('now') AS d")["d"]
-    alerts = demand_alerts_for_date(today)
+        today = q_one("SELECT date('now') AS d")["d"]
+        alerts = demand_alerts_for_date(today)
 
-    coverage = q_all("""
-        SELECT s.id, s.date, s.start_time, s.end_time, s.min_staff,
-               (SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id) AS assigned
-        FROM shifts s
-        WHERE date(s.date)=date(?)
-        ORDER BY s.start_time
-    """, (today,))
+        coverage = q_all("""
+            SELECT s.id, s.date, s.start_time, s.end_time, s.min_staff,
+                   (SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id) AS assigned
+            FROM shifts s
+            WHERE date(s.date)=date(?)
+            ORDER BY s.start_time
+        """, (today,))
 
-    # Convert mapping rows to dicts
-    coverage_list = [dict(c) for c in coverage]
+        # Weekly coverage for charts
+        week_coverage = q_all("""
+            SELECT s.date,
+                   SUM(s.min_staff) AS total_required,
+                   (SELECT COUNT(*) FROM assignments a WHERE a.shift_id IN
+                       (SELECT id FROM shifts WHERE date=s.date)) AS total_assigned
+            FROM shifts s
+            WHERE date(s.date) BETWEEN date(?) AND date(?)
+            GROUP BY s.date
+            ORDER BY s.date
+        """, (week_start, week_end))
 
-    return jsonify({
-        "week_start": week_start,
-        "week_end": week_end,
-        "total_employees": total_employees,
-        "pending_absences": pending_absences,
-        "approved_absences": approved_absences,
-        "today": today,
-        "alerts": alerts,
-        "coverage": coverage_list
-    })
+        # Role distribution
+        role_dist = q_all("""
+            SELECT role, COUNT(*) AS count FROM employees WHERE active=1 GROUP BY role
+        """)
 
+        return jsonify({
+            "week_start": week_start,
+            "week_end": week_end,
+            "total_employees": total_employees,
+            "pending_absences": pending_absences,
+            "approved_absences": approved_absences,
+            "today": today,
+            "alerts": alerts,
+            "coverage": [dict(c) for c in coverage],
+            "week_coverage": [dict(w) for w in week_coverage],
+            "role_distribution": [dict(r) for r in role_dist],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Employees ───────────────────────────────────────
 @app.get("/api/employees/all")
 def employees_page():
-    employees = q_all("SELECT * FROM employees ORDER BY active DESC, fullname")
-    skills = q_all("SELECT * FROM skills ORDER BY name")
-    emp_skills = q_all("""
-        SELECT es.employee_id, s.name, es.level
-        FROM employee_skills es
-        JOIN skills s ON s.id = es.skill_id
-    """)
-    map_es = {}
-    for r in emp_skills:
-        map_es.setdefault(r["employee_id"], {})[r["name"]] = r["level"]
+    try:
+        employees = q_all("SELECT * FROM employees ORDER BY active DESC, fullname")
+        skills = q_all("SELECT * FROM skills ORDER BY name")
+        emp_skills = q_all("""
+            SELECT es.employee_id, s.name, es.level
+            FROM employee_skills es
+            JOIN skills s ON s.id = es.skill_id
+        """)
+        map_es = {}
+        for r in emp_skills:
+            map_es.setdefault(r["employee_id"], {})[r["name"]] = r["level"]
 
-    return jsonify({
-        "employees": [dict(e) for e in employees],
-        "skills": [dict(s) for s in skills],
-        "emp_skills": map_es
-    })
-
-@app.get("/api/planning/all")
-def planning_page():
-    # ✅ IMPORTANT: default = current week (pas une date fixe)
-    week_start = request.args.get("week", get_current_week_start())
-    week_start, week_end = week_bounds(week_start)
-
-    shifts = q_all("""
-        SELECT * FROM shifts
-        WHERE date(date) BETWEEN date(?) AND date(?)
-        ORDER BY date(date), start_time
-    """, (week_start, week_end))
-
-    ass = q_all("""
-        SELECT a.shift_id, e.fullname, e.role, a.status
-        FROM assignments a
-        JOIN employees e ON e.id = a.employee_id
-        WHERE a.shift_id IN (
-            SELECT id FROM shifts WHERE date(date) BETWEEN date(?) AND date(?)
-        )
-        ORDER BY e.fullname
-    """, (week_start, week_end))
-
-    ass_map = {}
-    for r in ass:
-        # SQLite Row does not serialize simply
-        ass_map.setdefault(r["shift_id"], []).append(dict(r))
-
-    return jsonify({
-        "week_start": week_start,
-        "week_end": week_end,
-        "shifts": [dict(s) for s in shifts],
-        "ass_map": ass_map
-    })
-
-@app.get("/api/absences/all")
-def absences_page():
-    absences = q_all("""
-        SELECT a.*, e.fullname, e.role
-        FROM absences a
-        JOIN employees e ON e.id = a.employee_id
-        ORDER BY a.id DESC
-    """)
-    employees = q_all("SELECT id, fullname FROM employees WHERE active=1 ORDER BY fullname")
-    return jsonify({
-        "absences": [dict(a) for a in absences],
-        "employees": [dict(e) for e in employees]
-    })
-
-# ---------------- API ----------------
+        return jsonify({
+            "employees": [dict(e) for e in employees],
+            "skills": [dict(s) for s in skills],
+            "emp_skills": map_es
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.post("/api/employees")
 def api_add_employee():
@@ -156,8 +152,43 @@ def api_set_employee_skills(emp_id):
             "INSERT INTO employee_skills(employee_id, skill_id, level) VALUES (?,?,?)",
             (emp_id, srow["id"], int(level))
         )
-
     return jsonify({"ok": True})
+
+# ── Planning ────────────────────────────────────────
+@app.get("/api/planning/all")
+def planning_page():
+    try:
+        week_start = request.args.get("week", get_current_week_start())
+        week_start, week_end = week_bounds(week_start)
+
+        shifts = q_all("""
+            SELECT * FROM shifts
+            WHERE date(date) BETWEEN date(?) AND date(?)
+            ORDER BY date(date), start_time
+        """, (week_start, week_end))
+
+        ass = q_all("""
+            SELECT a.shift_id, e.fullname, e.role, a.status
+            FROM assignments a
+            JOIN employees e ON e.id = a.employee_id
+            WHERE a.shift_id IN (
+                SELECT id FROM shifts WHERE date(date) BETWEEN date(?) AND date(?)
+            )
+            ORDER BY e.fullname
+        """, (week_start, week_end))
+
+        ass_map = {}
+        for r in ass:
+            ass_map.setdefault(r["shift_id"], []).append(dict(r))
+
+        return jsonify({
+            "week_start": week_start,
+            "week_end": week_end,
+            "shifts": [dict(s) for s in shifts],
+            "ass_map": ass_map
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.post("/api/planning/generate")
 def api_generate_planning():
@@ -168,6 +199,24 @@ def api_generate_planning():
 
     res = generate_week_schedule(week_start)
     return jsonify(res)
+
+# ── Absences ────────────────────────────────────────
+@app.get("/api/absences/all")
+def absences_page():
+    try:
+        absences = q_all("""
+            SELECT a.*, e.fullname, e.role
+            FROM absences a
+            JOIN employees e ON e.id = a.employee_id
+            ORDER BY a.id DESC
+        """)
+        employees = q_all("SELECT id, fullname FROM employees WHERE active=1 ORDER BY fullname")
+        return jsonify({
+            "absences": [dict(a) for a in absences],
+            "employees": [dict(e) for e in employees]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.post("/api/absences/request")
 def api_request_absence():
@@ -193,14 +242,90 @@ def api_reject_absence(absence_id):
     exec_sql("UPDATE absences SET status='rejected' WHERE id=?", (absence_id,))
     return jsonify({"ok": True})
 
+# ── Chat (AI Agent) ─────────────────────────────────
 @app.post("/api/chat")
 def api_chat():
     data = request.get_json(force=True)
     msg = (data.get("message") or "").strip()
     if not msg:
         return jsonify({"ok": False, "answer": "Écris un message."}), 400
-    answer = handle_message(msg)
-    return jsonify({"ok": True, "answer": answer})
+    try:
+        answer = handle_message(msg)
+        return jsonify({"ok": True, "answer": answer})
+    except Exception as e:
+        return jsonify({"ok": False, "answer": f"Erreur: {str(e)}"}), 500
+
+# ── Analytics ───────────────────────────────────────
+@app.get("/api/analytics")
+def analytics():
+    try:
+        week_start = request.args.get("week", get_current_week_start())
+        week_start, week_end = week_bounds(week_start)
+
+        # Workload per employee this week
+        workload = q_all("""
+            SELECT e.id, e.fullname, e.role, e.weekly_hours AS max_hours,
+                   COALESCE(SUM(
+                       (CAST(substr(s.end_time,1,2) AS INT)*60 + CAST(substr(s.end_time,4,2) AS INT))
+                       - (CAST(substr(s.start_time,1,2) AS INT)*60 + CAST(substr(s.start_time,4,2) AS INT))
+                   ) / 60.0, 0) AS assigned_hours
+            FROM employees e
+            LEFT JOIN assignments a ON a.employee_id = e.id AND a.status IN ('planned','confirmed')
+            LEFT JOIN shifts s ON s.id = a.shift_id AND date(s.date) BETWEEN date(?) AND date(?)
+            WHERE e.active = 1
+            GROUP BY e.id
+            ORDER BY assigned_hours DESC
+        """, (week_start, week_end))
+
+        # Skill matrix
+        skill_matrix = q_all("""
+            SELECT e.id AS emp_id, e.fullname, sk.name AS skill, es.level
+            FROM employees e
+            JOIN employee_skills es ON es.employee_id = e.id
+            JOIN skills sk ON sk.id = es.skill_id
+            WHERE e.active = 1
+            ORDER BY e.fullname, sk.name
+        """)
+        matrix = {}
+        for r in skill_matrix:
+            matrix.setdefault(r["emp_id"], {"name": r["fullname"], "skills": {}})\
+                  ["skills"][r["skill"]] = r["level"]
+
+        # Absence frequency per employee
+        absence_freq = q_all("""
+            SELECT e.fullname, COUNT(a.id) AS total_absences
+            FROM employees e
+            LEFT JOIN absences a ON a.employee_id = e.id
+            WHERE e.active = 1
+            GROUP BY e.id
+            ORDER BY total_absences DESC
+        """)
+
+        # All skills list
+        all_skills = q_all("SELECT name FROM skills ORDER BY name")
+
+        return jsonify({
+            "week_start": week_start,
+            "week_end": week_end,
+            "workload": [dict(w) for w in workload],
+            "skill_matrix": matrix,
+            "all_skills": [s["name"] for s in all_skills],
+            "absence_frequency": [dict(a) for a in absence_freq],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Error Handlers ──────────────────────────────────
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint introuvable"}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Erreur serveur interne"}), 500
 
 if __name__ == "__main__":
+    print(f"✅ Pharma RH Agent v2.0 — http://localhost:5000")
+    print(f"   AI Model: {os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')}")
+    print(f"   Endpoints: /api/dashboard, /api/employees, /api/planning, /api/absences, /api/chat, /api/analytics, /api/health")
     app.run(debug=True)

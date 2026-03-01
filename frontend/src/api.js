@@ -15,4 +15,5 @@ export const api = {
     approveAbsence: (id) => axios.post(`${API_BASE_URL}/absences/${id}/approve`),
     rejectAbsence: (id) => axios.post(`${API_BASE_URL}/absences/${id}/reject`),
     chatMsg: (message) => axios.post(`${API_BASE_URL}/chat`, { message }),
+    getAnalytics: (week) => axios.get(`${API_BASE_URL}/analytics${week ? `?week=${week}` : ''}`),
 };

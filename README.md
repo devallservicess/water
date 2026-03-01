@@ -1,141 +1,152 @@
-# Pharma RH Agent
+# 💊 Pharma RH Agent — AI-Powered HR Management
 
-Pharma RH Agent is a full-stack web application designed for the human resources management of a pharmacy. It features an automated scheduling engine, an intelligent NLP chatbot for managing absences and replacements, and a comprehensive dashboard for tracking employee hours, skills, and shift coverage.
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
+![Groq](https://img.shields.io/badge/Groq-Llama_3.3_70B-F55036?logo=meta)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-The project uses a **decoupled architecture** with a Python/Flask REST API backend and a React (Vite) frontend.
+> **Système intelligent de gestion RH pour pharmacie** avec planification automatique, chatbot IA, analytics avancés et export PDF.
 
-## Features
+---
 
--   **Dashboard:** View the current week's summary including total active employees, pending/approved absences, and daily shift coverage vs. demand alerts.
--   **Employee Management:** Add employees, toggle their active status, assign specific roles (Pharmacien, Préparateur, Caissier, etc.), and manage their skills and skill levels.
--   **Automated Planning Generator:** Automatically generates a weekly schedule assigning eligible employees to shifts based on their skills, availability, maximum hours, and rest period rules (e.g., minimum 11 hours rest between shifts). If no shifts are defined for the week, default morning/evening shifts are created automatically.
--   **Absence Management:** Employees can request absences, which managers can then approve or reject.
--   **NLP Agent Chatbot:** A built-in chat interface that understands natural language queries. Employees or managers can ask the agent to:
-    -   Generate the planning for the week (e.g., *"Génère le planning"*).
-    -   Check who is available on a specific date (e.g., *"Qui est dispo le 2026-03-05"*).
-    -   Request an absence (e.g., *"Ajoute absence 2 2026-03-05 2026-03-06"*).
-    -   Suggest replacements for an approved absence (e.g., *"Remplacement 1"*).
+## ✨ Features
 
-## Architecture
+| Feature | Description |
+|---------|-------------|
+| 📊 **Dashboard Interactif** | KPIs en temps réel, graphiques de couverture hebdomadaire, répartition par rôle (Recharts) |
+| 👥 **Gestion Employés** | CRUD complet, compétences avec niveaux, statut actif/inactif |
+| 📅 **Planning Automatique** | Algorithme intelligent avec respect des règles RH (repos 11h, max heures, absences) |
+| 📝 **Gestion Absences** | Demandes, approbations, refus avec notifications toast |
+| 🤖 **Chatbot IA (Groq Llama 3.3)** | NLP français + IA conversationnelle pour requêtes complexes |
+| 📈 **Analytics** | Workload distribution, skill matrix, absence trends, overtime alerts |
+| 📄 **Export PDF** | Plannings hebdomadaires en PDF branded |
+| 🎨 **UI Premium** | Framer Motion animations, toasts, loading spinners, backdrop blur modals |
 
--   **Backend:** Python 3.9+ / Flask — A pure JSON REST API.
--   **Frontend:** React 19 / Vite — A single-page application using React Router, Axios, Tailwind CSS, and Lucide icons.
--   **Database:** SQLite via custom wrapper functions (`backend/models/db.py`).
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph LR
+    A[React SPA<br/>Vite + Tailwind] -->|REST API| B[Flask Server<br/>Port 5000]
+    B --> C[(SQLite DB)]
+    B --> D[Groq API<br/>Llama 3.3 70B]
+    B --> E[Scheduler Engine<br/>HR Rules]
+    B --> F[Demand Forecast<br/>Alert System]
+```
 
 ### Directory Structure
 
-```plaintext
+```
 pharma-rh-agent-main/
-├── backend/                        # Flask REST API
-│   ├── app.py                      # Main Flask application and API routes
-│   ├── seed.py                     # Script to initialize and seed the SQLite database
-│   ├── requirements.txt            # Python package dependencies
-│   ├── data/                       # Contains the SQLite database file (pharma.db)
-│   ├── models/
-│   │   └── db.py                   # Database connection and query utilities
-│   ├── services/                   # Business logic
-│   │   ├── agent.py                # NLP intent parsing and chat responses
-│   │   ├── demand_forecast.py      # Logic for predicting busy periods (alerts)
-│   │   ├── rules.py                # HR rules validation (rest hours, max hours, absences)
-│   │   └── scheduler.py            # Automated weekly schedule generation logic
-│   └── tests/                      # Automated test suite (pytest)
-│       └── test_app.py
+├── backend/
+│   ├── app.py                  # Flask API (health, dashboard, employees, planning, absences, chat, analytics)
+│   ├── seed.py                 # DB initialization + demo data
+│   ├── .env                    # Groq API key & model config
+│   ├── models/db.py            # SQLite connection utilities
+│   └── services/
+│       ├── agent.py            # NLP intent parser + Groq AI fallback
+│       ├── scheduler.py        # Automated weekly schedule generator
+│       ├── demand_forecast.py  # Customer demand analysis & alerts
+│       └── rules.py            # HR rules (rest hours, max hours, absences)
 │
-├── frontend/                       # React (Vite) SPA
-│   ├── package.json                # Node.js dependencies and scripts
-│   ├── vite.config.js              # Vite configuration
-│   └── src/
-│       ├── main.jsx                # Application entry point
-│       ├── App.jsx                 # Root component with routing and sidebar
-│       ├── api.js                  # Axios API client (connects to backend)
-│       ├── index.css               # Global styles
-│       └── pages/                  # Page components
-│           ├── Dashboard.jsx       # Dashboard view
-│           ├── Employees.jsx       # Employee management view
-│           ├── Planning.jsx        # Weekly planning view
-│           ├── Absences.jsx        # Absence management view
-│           └── Chat.jsx            # NLP agent chatbot view
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx             # Root with sidebar, routing, Framer Motion, toasts
+│   │   ├── api.js              # Axios API client
+│   │   └── pages/
+│   │       ├── Dashboard.jsx   # KPIs + Recharts (bar, pie)
+│   │       ├── Employees.jsx   # Employee management + skills
+│   │       ├── Planning.jsx    # Weekly schedule + PDF export
+│   │       ├── Absences.jsx    # Absence management
+│   │       ├── Analytics.jsx   # Workload, skills matrix, trends
+│   │       └── Chat.jsx        # AI chatbot (Groq Llama 3.3)
+│   └── package.json
 │
 └── README.md
 ```
 
-## Setup & Installation
+---
 
-Follow these steps to set up and run the Pharma RH Agent locally.
+## 🚀 API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Health check + version info |
+| `GET` | `/api/dashboard` | Dashboard KPIs, charts, coverage |
+| `GET` | `/api/employees/all` | All employees + skills |
+| `POST` | `/api/employees` | Add new employee |
+| `POST` | `/api/employees/:id/toggle` | Toggle active status |
+| `POST` | `/api/employees/:id/skills` | Update employee skills |
+| `GET` | `/api/planning/all` | Weekly planning + assignments |
+| `POST` | `/api/planning/generate` | Auto-generate schedule |
+| `GET` | `/api/absences/all` | All absences |
+| `POST` | `/api/absences/request` | Request absence |
+| `POST` | `/api/absences/:id/approve` | Approve absence |
+| `POST` | `/api/absences/:id/reject` | Reject absence |
+| `POST` | `/api/chat` | AI chatbot (NLP + Groq) |
+| `GET` | `/api/analytics` | Workload, skills, trends |
+
+---
+
+## ⚙️ Setup & Installation
 
 ### Prerequisites
+- Python 3.9+
+- Node.js 18+
 
--   Python 3.9+
--   Node.js 18+ and npm
+### Backend
 
-### 1. Clone the Repository
-
-```powershell
-git clone https://github.com/your-username/pharma-rh-agent-main.git
-cd pharma-rh-agent-main
-```
-
-### 2. Backend Setup
-
-```powershell
-# Create and activate a virtual environment
+```bash
+cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Install Python dependencies
-cd backend
+.venv\Scripts\Activate.ps1        # Windows
 pip install -r requirements.txt
-
-# Initialize the database with schema and demo data
-python seed.py
+python seed.py                     # Initialize DB
+python app.py                      # Start API on :5000
 ```
 
-### 3. Frontend Setup
+### Frontend
 
-```powershell
-# In a new terminal, navigate to the frontend directory
+```bash
 cd frontend
-
-# Install Node.js dependencies
 npm install
+npm run dev                        # Start on :5173
 ```
 
-### 4. Run the Application
+---
 
-You need **two terminals** to run both servers simultaneously.
+## 🤖 AI Integration
 
-**Terminal 1 — Backend (Flask API on port 5000):**
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-python app.py
-```
+The chatbot uses a **dual-layer NLP approach**:
 
-**Terminal 2 — Frontend (Vite dev server on port 5173):**
-```powershell
-cd frontend
-npm run dev
-```
+1. **Fast Path (Regex)** — Structured commands like `génère planning`, `dispo 2026-03-05` are parsed instantly via regex
+2. **AI Fallback (Groq Llama 3.3 70B)** — Any natural language query falls through to the LLM, which receives full database context (employees, absences, shifts) for intelligent, context-aware responses
 
-Open your browser and navigate to `http://localhost:5173` to use the application.
+---
 
-## Testing
+## 🧪 Testing
 
-### Backend Tests
-
-The backend includes an automated test suite using `pytest`. Tests cover API endpoints, NLP agent intent extraction, and database logic using an isolated temporary database.
-
-```powershell
+```bash
 cd backend
 pip install pytest pytest-flask
 python -m pytest tests/test_app.py -v
 ```
 
-### Frontend Linting
+---
 
-The frontend uses ESLint for code quality checks.
+## 📦 Tech Stack
 
-```powershell
-cd frontend
-npm run lint
-```
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | React 19, Vite, Tailwind CSS, Recharts, Framer Motion, jsPDF, html2canvas, Lucide |
+| **Backend** | Python 3.9+, Flask, SQLite, Groq SDK, python-dotenv |
+| **AI** | Groq Cloud, Llama 3.3 70B Versatile |
+
+---
+
+<p align="center">
+  <strong>Built with ❤️ for pharmacy HR management</strong><br/>
+  <sub>© 2026 Pharma RH Agent · v2.0</sub>
+</p>
